@@ -18,41 +18,34 @@ namespace _3DFun
 
             Text = "Cube";
 
-            // Geometry:
+            // Model:
 
-            var initialCubePoints = new List<Vector3>
+            var cube = new Model<Vector3>
             {
-               new Vector3(-1, +1, +1), // 0
-               new Vector3(+1, +1, +1), // 1
-               new Vector3(+1, -1, +1), // 2
-               new Vector3(-1, -1, +1), // 3
-                //                      // 
-               new Vector3(-1, +1, -1), // 4
-               new Vector3(+1, +1, -1), // 5
-               new Vector3(+1, -1, -1), // 6
-               new Vector3(-1, -1, -1), // 7
+                Vertices = new List<Vector3>
+                {
+                    new Vector3(-1, +1, +1), // 0
+                    new Vector3(+1, +1, +1), // 1
+                    new Vector3(+1, -1, +1), // 2
+                    new Vector3(-1, -1, +1), // 3
+                     //                      // 
+                    new Vector3(-1, +1, -1), // 4
+                    new Vector3(+1, +1, -1), // 5
+                    new Vector3(+1, -1, -1), // 6
+                    new Vector3(-1, -1, -1), // 7
+                },
+                TemplatedFaces = new List<IReadOnlyList<int>>
+                {
+                    new[] { 0, 1, 2, 3 },
+                    new[] { 4, 5, 6, 7 },
+                    new[] { 0, 4, 7, 3 },
+                    new[] { 1, 5, 6, 2 },
+                    // Top and bottom faces are missing since we are only doing wireframes for now...
+                }
             };
 
-            static List<(T A, T B)> GetCubeSegments<T>(IList<T> cubePoints) => new List<(T A, T B)>(12)
-            {
-                (cubePoints[0], cubePoints[1]),
-                (cubePoints[1], cubePoints[2]),
-                (cubePoints[2], cubePoints[3]),
-                (cubePoints[3], cubePoints[0]),
-                //
-                (cubePoints[4], cubePoints[5]),
-                (cubePoints[5], cubePoints[6]),
-                (cubePoints[6], cubePoints[7]),
-                (cubePoints[7], cubePoints[4]),
-                //
-                (cubePoints[0], cubePoints[4]),
-                (cubePoints[1], cubePoints[5]),
-                (cubePoints[2], cubePoints[6]),
-                (cubePoints[3], cubePoints[7]),
-            };
-
-            var topPlaneDiagonal = Vector3.Add(initialCubePoints[0], initialCubePoints[5]);
-            var rotationCenter = Vector3.Divide(topPlaneDiagonal, 2); // should be the origin in this case (ignoring Y)
+            //var topPlaneDiagonal = Vector3.Add(initialCubeVertices[0], initialCubeVertices[5]);
+            var rotationCenter = Model.GetCenter(cube); //Vector3.Divide(topPlaneDiagonal, 2); // should be the origin in this case (ignoring Y)
 
             // Animation update timer:
 
@@ -102,17 +95,17 @@ namespace _3DFun
                 var currentStepAngle = (animationStep / animationMaxStep) * (Math.PI * 2);
                 var rotationAndZBackTranslation = Matrix4x4.CreateRotationY((float)currentStepAngle, rotationCenter);
                 rotationAndZBackTranslation.Translation = moveZBackTranslation;
-                var projectedPoints = (from point in initialCubePoints
-                                       let rotated = Vector3.Transform(point, rotationAndZBackTranslation)
-                                       let projected = Project2D(rotated)
-                                       let remapped = Vector2.Transform(projected, remap)
-                                       select remapped).ToList();
+                var projectedVertices = (from vertex in cube.Vertices
+                                         let rotated = Vector3.Transform(vertex, rotationAndZBackTranslation)
+                                         let projected = Project2D(rotated)
+                                         let remapped = Vector2.Transform(projected, remap)
+                                         select remapped).ToList();
 
-                var projectedSegments = GetCubeSegments(projectedPoints);
+                var projectedEdges = cube.TemplatedWireframeEdges.Select(x => new Edge<Vector2>(projectedVertices[x.A], projectedVertices[x.B]));
 
-                foreach (var segment in projectedSegments)
+                foreach (var (A, B) in projectedEdges)
                 {
-                    e.Surface.Canvas.DrawLine(segment.A.X, segment.A.Y, segment.B.X, segment.B.Y, fgPaint);
+                    e.Surface.Canvas.DrawLine(A.X, A.Y, B.X, B.Y, fgPaint);
                 }
             };
 
@@ -175,5 +168,81 @@ namespace _3DFun
                 }
             }
         }
+    }
+
+    public class Model<TVertex>
+    {
+
+        public IReadOnlyList<TVertex> Vertices { get; set; }
+        /// <summary>
+        /// A face is a polygon, defined by a list of vertices index.
+        /// The start and the end are automatically connected.
+        /// </summary>
+        public IReadOnlyList<IReadOnlyList<int>> TemplatedFaces
+        {
+            get => _templatedFaces;
+            set
+            {
+                _templatedFaces = value;
+                TemplatedWireframeEdges = GetTemplatedEdgesForWireframe();
+            }
+        }
+        private IReadOnlyList<IReadOnlyList<int>> _templatedFaces;
+
+        public IReadOnlyList<Edge<int>> TemplatedWireframeEdges { get; private set; }
+
+        private IReadOnlyList<Edge<int>> GetTemplatedEdgesForWireframe() => EnumerateAllTemplatedEdges().ToHashSet().ToList();
+
+        public IEnumerable<Edge<int>> EnumerateAllTemplatedEdges()
+        {
+            foreach (var polygon in TemplatedFaces)
+            {
+                for (int i = 0; i < polygon.Count - 1; i++)
+                {
+                    yield return new Edge<int>(polygon[i], polygon[i + 1]);
+                }
+                // Implicit last edge
+                yield return new Edge<int>(polygon[0], polygon[polygon.Count - 1]);
+            }
+        }
+    }
+
+    [DebuggerDisplay("{" + nameof(DebuggerFormatted) + ",nq}")]
+    public class Edge<TVertex>
+    {
+        public TVertex A { get; }
+        public TVertex B { get; }
+
+        public Edge(TVertex a, TVertex b)
+        {
+            A = a;
+            B = b;
+        }
+
+        public void Deconstruct(out TVertex A, out TVertex B)
+        {
+            A = this.A;
+            B = this.B;
+        }
+
+        private string DebuggerFormatted => $"{A:#0} {B:#0}";
+
+        // Commutative equality
+        public override bool Equals(object obj) => obj is Edge<TVertex> edge &&
+                   ((EqualityComparer<TVertex>.Default.Equals(A, edge.A) && EqualityComparer<TVertex>.Default.Equals(B, edge.B))
+                 || (EqualityComparer<TVertex>.Default.Equals(A, edge.B) && EqualityComparer<TVertex>.Default.Equals(B, edge.A)));
+        // Commutative hashcode
+        public override int GetHashCode() => HashCode.Combine(A) + HashCode.Combine(B);
+        public static bool operator ==(Edge<TVertex> left, Edge<TVertex> right) => EqualityComparer<Edge<TVertex>>.Default.Equals(left, right);
+        public static bool operator !=(Edge<TVertex> left, Edge<TVertex> right) => !(left == right);
+    }
+
+    public static class Model
+    {
+        public static Vector3 GetCenter(Model<Vector3> model)
+            => new Vector3(
+                model.Vertices.Sum(x => x.X) / model.Vertices.Count,
+                model.Vertices.Sum(x => x.Y) / model.Vertices.Count,
+                model.Vertices.Sum(x => x.Z) / model.Vertices.Count);
     }
 }
